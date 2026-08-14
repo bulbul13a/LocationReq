@@ -54,14 +54,20 @@ export default function RecipientClient({
       async (position) => {
         try {
           setStatus('SUBMITTING')
-          await submitLocation(
+          const result = await submitLocation(
             rawToken,
             position.coords.latitude,
             position.coords.longitude,
             position.coords.accuracy,
             new Date(position.timestamp).toISOString()
           )
-          setStatus('SUCCESS')
+          
+          if (result.error) {
+            setStatus('ERROR')
+            setErrorMessage(result.error)
+          } else {
+            setStatus('SUCCESS')
+          }
         } catch (err: any) {
           setStatus('ERROR')
           setErrorMessage(err.message || 'Failed to submit location.')
@@ -94,8 +100,13 @@ export default function RecipientClient({
 
   const handleDecline = async () => {
     try {
-      await declineRequest(rawToken)
-      setStatus('DECLINED')
+      const result = await declineRequest(rawToken)
+      if (result.error) {
+        setStatus('ERROR')
+        setErrorMessage(result.error)
+      } else {
+        setStatus('DECLINED')
+      }
     } catch (err) {
       setStatus('ERROR')
       setErrorMessage('Failed to decline request, please try again.')

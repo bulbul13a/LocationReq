@@ -11,43 +11,17 @@ export async function submitLocation(
   accuracy: number,
   deviceTimestamp: string | null
 ) {
-  const supabase = await createClient()
-
   // Validate coordinates
   if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-    throw new Error('Invalid coordinates')
+    return { error: 'Invalid coordinates' }
   }
 
   // Hash the token to look it up
   const publicTokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
 
-  // Fetch the request
-  const { data: request, error: fetchError } = await supabase
-    .from('location_requests')
-    .select('*')
-    .eq('public_token_hash', publicTokenHash)
-    .single()
-
-  if (fetchError || !request) {
-    throw new Error('Invalid location request')
-  }
-
-  if (request.status !== 'PENDING') {
-    throw new Error(`Request has already been processed (Status: ${request.status})`)
-  }
-
-  if (new Date(request.expires_at) < new Date()) {
-    // Optionally update status to EXPIRED here
-    await supabase.from('location_requests').update({ status: 'EXPIRED' }).eq('id', request.id)
-    throw new Error('This location request has expired')
-  }
-
-  // Insert location and update request status in a single transaction (or sequentially using service role)
-  // Since we are using RLS and want to bypass it for this specific public submission, we can use the service role key.
-  
   const supabaseAdmin = (await import('@supabase/ssr')).createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!, // Use service role to bypass RLS for insertion
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       cookies: {
         getAll() { return [] },
@@ -55,6 +29,26 @@ export async function submitLocation(
       },
     }
   )
+
+  // Fetch the request
+  const { data: request, error: fetchError } = await supabaseAdmin
+    .from('location_requests')
+    .select('*')
+    .eq('public_token_hash', publicTokenHash)
+    .single()
+
+  if (fetchError || !request) {
+    return { error: 'Invalid location request' }
+  }
+
+  if (request.status !== 'PENDING') {
+    return { error: `Request has already been processed (Status: ${request.status})` }
+  }
+
+  if (new Date(request.expires_at) < new Date()) {
+    await supabaseAdmin.from('location_requests').update({ status: 'EXPIRED' }).eq('id', request.id)
+    return { error: 'This location request has expired' }
+  }
 
   const { error: insertError } = await supabaseAdmin
     .from('locations')
@@ -68,7 +62,7 @@ export async function submitLocation(
 
   if (insertError) {
     console.error('Insert location error:', insertError)
-    throw new Error('Failed to save location')
+    return { error: 'Failed to save location' }
   }
 
   const { error: updateError } = await supabaseAdmin
@@ -81,7 +75,7 @@ export async function submitLocation(
 
   if (updateError) {
     console.error('Update request error:', updateError)
-    throw new Error('Failed to update request status')
+    return { error: 'Failed to update request status' }
   }
 
   return { success: true }
@@ -108,7 +102,7 @@ export async function declineRequest(rawToken: string) {
     .single()
 
   if (fetchError || !request) {
-    throw new Error('Invalid request')
+    return { error: 'Invalid request' }
   }
 
   if (request.status === 'PENDING') {
